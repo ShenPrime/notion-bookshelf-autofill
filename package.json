@@ -1,0 +1,12 @@
+{
+  "name": "notion-bookshelf-autofill",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "test": "node ./src/index.js"
+  },
+  "keywords": [],
+  "author": "Adel Alkhesh",
+  "license": "ISC"
+}
