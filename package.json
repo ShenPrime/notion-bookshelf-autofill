@@ -4,7 +4,8 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-    "test": "node ./src/index.js"
+    "start": "node ./src/index.js",
+    "build": "npm run build"
   },
   "keywords": [],
   "author": "Adel Alkhesh",
