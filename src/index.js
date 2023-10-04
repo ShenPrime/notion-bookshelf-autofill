@@ -5,8 +5,6 @@ const port = 3000
 
 const axios = require("axios");
 require('dotenv').config();
-
-
 const databaseID = process.env.DATA_BASE_ID;
 const googleApiKey = process.env.GOOGLE_API_KEY;
 let books;
@@ -14,37 +12,58 @@ let book;
 let pageId;
 const notion = new Client({auth: process.env.NOTION_API_KEY});
 
-async function fetchData () {
+async function fetchData() {
     book = null;
+
     try {
         const res = await notion.databases.query({
-            database_id:databaseID,
+            database_id: databaseID,
             filter: {
-                property: 'Title',
-                rich_text: {
-                    contains: ';'
-                }
+                or: [
+                    {
+                        property: 'Title',
+                        rich_text: {
+                            contains: ';'
+                        }
+                    },
+                    {
+                        property: 'Author(s)',
+                        multi_select: {
+                            contains: ';'
+                        }
+                    },
+                    {
+                        property: 'Publisher',
+                        multi_select: {
+                            contains: ';'
+                        }
+                    }
+                ]
             }
-
         })
+
         books = res.results.map(book => {
-           return  book.properties.Title.title[0].plain_text;
+            return {
+                title: book.properties.Title.title[0].plain_text,
+                author: book.properties["Author(s)"].multi_select[0]?.name ? book.properties['Author(s)'].multi_select[0].name : '',
+                publisher: book.properties.Publisher.multi_select[0]?.name ? book.properties.Publisher.multi_select[0].name : ''
+            };
         });
         pageId = res.results.map(page => {
             return page.id;
         })
         if (books.length) {
+            // console.log(books);
             await getBook(books);
         }
-
 
     } catch (e) {
         console.log(e);
     }
-
 }
 
 async function insertData(book) {
+
     try {
         const res = await notion.pages.update({
             parent: {
@@ -52,6 +71,7 @@ async function insertData(book) {
             },
             page_id: pageId,
             properties: {
+
                 Title: {
                     title: [
                         {
@@ -61,46 +81,40 @@ async function insertData(book) {
                         }
                     ]
                 },
-                Pages: {
-                    number: book.pages ? book.pages : null,
+
+                "Pages (Physical)": {
+                    number: book.pages ? book.pages : 0,
                 },
                 Rating: {
-                    number: book.rating ? book.rating : null,
+                    number: book.rating ? book.rating : 0,
                 },
+
                 'Author(s)': {
                     multi_select: [
                         {
                             name: book.authors ? book.authors[0] : null
-                        }
+                        },
                     ]
                 },
+
                 Published: {
-                   rich_text : [
-                       {
-                           text: {
-                               content: book.publishedDate ? book.publishedDate : 'Not found!'
-                           }
-                       }
-                   ]
+                    rich_text: [
+                        {
+                            text: {
+                                content: book.publishedDate ? book.publishedDate : 'Not found!'
+                            }
+                        }
+                    ]
                 },
+
                 Publisher: {
-                    rich_text : [
+                    multi_select: [
                         {
-                            text: {
-                                content: book.publisher ? book.publisher : 'Not found!'
-                            }
+                            name: book.publisher ? [book.publisher] : [];
                         }
                     ]
                 },
-                Description: {
-                    rich_text : [
-                        {
-                            text: {
-                                content: book.description ? book.description : 'Not found!'
-                            }
-                        }
-                    ]
-                },
+
                 'Genre(s)': {
                     multi_select: [
                         {
@@ -110,52 +124,64 @@ async function insertData(book) {
                 }
             }
         })
+
     } catch (e) {
         console.log(e);
     }
-
 }
 
-
 async function getBook(books) {
+    const bookTitle = books[0].title.substring(0, books[0].title.indexOf(';'));
+    const bookAuthors = books[0].author ? books[0].author : '';
+    // const bookPublisher = books[0].publisher ? books[0].publisher : '';
+    const url = `https://www.googleapis.com/books/v1/volumes?q=${bookTitle}+inauthor:${bookAuthors}&key=${googleApiKey}`
+
+    // console.log('bookTITLE:',bookTitle, 'bookAUTHOR:', bookAuthors,'bookPUBLISHER:', bookPublisher)
     try {
-        const res = await axios.get(`https://www.googleapis.com/books/v1/volumes?q=${books[0]}&key=${googleApiKey}`)
-        const bookInfo = await res.data.items[0].volumeInfo;
+        const res = await axios.get(url)
+        const bookInfo = await res.data.items;
+        const bookInfoMapped = bookInfo.map(book => book.volumeInfo)
+
+        //TODO: Create more efficient method to filter
+        const bookInfoFiltered = bookInfoMapped
+            .filter(book => book.hasOwnProperty('title'))
+            .filter(book => book.title.toUpperCase() === bookTitle.toUpperCase())
+            .filter(book => book.language === 'en')
+
         book = {
-            title: bookInfo.title,
-            authors: bookInfo.authors,
-            publisher: bookInfo.publisher,
-            publishedDate: bookInfo.publishedDate,
-            description: bookInfo.description,
-            pages: bookInfo.pageCount,
-            genres: bookInfo.categories,
-            rating: bookInfo.averageRating,
+            title: bookInfoFiltered[0].title,
+            authors: bookInfoFiltered[0].authors,
+            publisher: bookInfoFiltered[0].publisher,
+            publishedDate: bookInfoFiltered[0].publishedDate,
+            description: bookInfoFiltered[0].description,
+            pages: bookInfoFiltered[0].pageCount,
+            genres: bookInfoFiltered[0].categories,
+            rating: bookInfoFiltered[0].averageRating,
         }
+
         console.log(book);
     } catch (e) {
-        console.log(e);
+        console.log(e.message);
     }
-
 }
 
 async function fetchAndUpdateBook() {
-    try{
+
+    try {
         await fetchData();
+
         if (book != null) {
             await insertData(book);
-        }else {
+        } else {
             console.log('no books found to search!')
         }
-    }catch (e) {
+
+    } catch (e) {
         console.log(e);
     }
 }
 
-// app.get('/', async (req, res) => {
-     setInterval(fetchAndUpdateBook, 5000);
-
-// })
-
+setInterval(fetchAndUpdateBook, 5000);
 
 app.listen(port, () => {
     console.log('Server listening on port 3000');
